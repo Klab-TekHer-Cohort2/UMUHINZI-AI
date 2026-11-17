@@ -1,0 +1,333 @@
+{
+  "_meta": {
+    "review_note": "RW-CHECK: All Kinyarwanda pest names, symptoms, treatment and prevention text below should be reviewed by a native Kinyarwanda speaker / agronomist before production use. English is the reference translation.",
+    "rw_review_required": true,
+    "version": 1
+  },
+  "pests": [
+    {
+      "id": "fall_armyworm",
+      "name_rw": "Inyo y'ibigori (Fall Armyworm)",
+      "name_en": "Fall Armyworm",
+      "crops": {
+        "rw": ["ibigori", "amasaka", "umuceri"],
+        "en": ["maize", "sorghum", "rice"]
+      },
+      "keywords": {
+        "rw": [
+          "inyo",
+          "uduhumbi",
+          "utuzi",
+          "amagi y'umweru",
+          "amababi arashye",
+          "ifu y'umukara",
+          "umusenyi mu mababi",
+          "udusimba",
+          "ibyonnyi",
+          "amababi y'ibigori arashye"
+        ],
+        "en": [
+          "fall armyworm",
+          "armyworm",
+          "caterpillar",
+          "white egg masses",
+          "ragged leaves",
+          "holes in leaves",
+          "sawdust frass",
+          "maize leaves eaten"
+        ]
+      },
+      "treatment": {
+        "rw": [
+          "Kura udukoko ku mababi n'amaboko, ubite mu mazi y'isabune.",
+          "Baza umujyanama w'ubuhinzi ku muti wemewe wo kurwanya inyo.",
+          "Siba ibihingwa byanduye cyane kandi ubyite kure y'umurima."
+        ],
+        "en": [
+          "Handpick caterpillars from leaves and drown them in soapy water.",
+          "Ask an agricultural extension worker about an approved pesticide for armyworm.",
+          "Remove and destroy heavily infested plants away from the field."
+        ]
+      },
+      "prevention": {
+        "rw": [
+          "Hinga ibigori n'ibishyimbo hamwe (push-pull) kugabanya inyo.",
+          "Sura umurima buri munsi ureba amagi n'uduhumbi.",
+          "Koresha imbuto zizewe kandi uhinge mu gihe gikwiye."
+        ],
+        "en": [
+          "Intercrop maize with beans (push-pull) to reduce armyworm.",
+          "Scout the field every day for egg masses and caterpillars.",
+          "Use certified seed and plant at the right time."
+        ]
+      }
+    },
+    {
+      "id": "maize_stalk_borer",
+      "name_rw": "Inyo y'umushyitsi w'ibigori (Maize Stalk Borer)",
+      "name_en": "Maize Stalk Borer",
+      "crops": {
+        "rw": ["ibigori", "amasaka", "ibisubi"],
+        "en": ["maize", "sorghum", "sugarcane"]
+      },
+      "keywords": {
+        "rw": [
+          "umushyitsi",
+          "umwobo mu giti",
+          "inyo mu giti",
+          "ibigori byarakunze",
+          "amababi y'umye",
+          "ubusa mu giti",
+          "umutwe w'ibigori wumye",
+          "urunyeganyega mu giti"
+        ],
+        "en": [
+          "stalk borer",
+          "hole in stem",
+          "tunnel in stem",
+          "dead heart",
+          "maize stem broken",
+          "caterpillar inside stalk",
+          "sawdust at stem entrance"
+        ]
+      },
+      "treatment": {
+        "rw": [
+          "Kura ibihingwa byanduye ubyite kure y'umurima.",
+          "Baza umujyanama ku muti wemewe wo kurwanya umushyitsi.",
+          "Shyiramo umuti wemewe mu mwobo w'igiti uko wabwirwa n'umujyanama."
+        ],
+        "en": [
+          "Remove and destroy infested plants away from the field.",
+          "Ask an extension worker about an approved stalk borer treatment.",
+          "Apply the approved product into the stem tunnel as advised."
+        ]
+      },
+      "prevention": {
+        "rw": [
+          "Siba ibisigari by'ibigori nyuma y'isarura.",
+          "Hinga mu gihe gikwiye kandi ukoreshe imbuto zizewe.",
+          "Hindura ibihingwa mu murima buri mwaka."
+        ],
+        "en": [
+          "Destroy maize stubble after harvest.",
+          "Plant at the right time and use certified seed.",
+          "Rotate crops in the field every season."
+        ]
+      }
+    },
+    {
+      "id": "cassava_mosaic",
+      "name_rw": "Indwara ya Mosaic y'imyumbati (Cassava Mosaic Disease)",
+      "name_en": "Cassava Mosaic Disease",
+      "crops": {
+        "rw": ["imyumbati"],
+        "en": ["cassava"]
+      },
+      "keywords": {
+        "rw": [
+          "imyumbati",
+          "amababi y'umuhondo",
+          "amababi agoretse",
+          "mosaic",
+          "ibimera bigenda gahoro",
+          "amababi y'ibara ry'icyatsi n'umuhondo",
+          "ubushyamirane ku mababi",
+          "imizi mito y'imyumbati"
+        ],
+        "en": [
+          "cassava mosaic",
+          "mosaic pattern",
+          "yellow cassava leaves",
+          "twisted cassava leaves",
+          "stunted cassava",
+          "small cassava roots"
+        ]
+      },
+      "treatment": {
+        "rw": [
+          "Nta muti ugarukiriza mosaic; siba ibihingwa birwaye ubyite.",
+          "Koresha imbuto z'imyumbati zizewe (clean cuttings) gusa.",
+          "Baza umujyanama ku bijyanye no guhindura ubwoko bw'imyumbati."
+        ],
+        "en": [
+          "There is no cure for mosaic; remove and destroy infected plants.",
+          "Use only certified disease-free cassava cuttings.",
+          "Ask an extension worker about switching to a resistant variety."
+        ]
+      },
+      "prevention": {
+        "rw": [
+          "Koresha imbuto zizewe gusa.",
+          "Kura ibihingwa birwaye buri gihe ubibona.",
+          "Kurwanya udukoko tw'amasazi twanduza imyumbati."
+        ],
+        "en": [
+          "Use certified planting material only.",
+          "Rogue out infected plants as soon as you see them.",
+          "Control whiteflies that spread the disease."
+        ]
+      }
+    },
+    {
+      "id": "bean_fly",
+      "name_rw": "Isazi y'ibishyimbo (Bean Fly)",
+      "name_en": "Bean Fly",
+      "crops": {
+        "rw": ["ibishyimbo"],
+        "en": ["beans"]
+      },
+      "keywords": {
+        "rw": [
+          "isazi",
+          "isazi y'ibishyimbo",
+          "amababi y'ibishyimbo y'umuhondo",
+          "ibishyimbo bito",
+          "imizi y'ibishyimbo",
+          "uruhumbi mu mizi",
+          "ibihingwa bigenda gahoro",
+          "ibishyimbo byuma"
+        ],
+        "en": [
+          "bean fly",
+          "bean maggots",
+          "yellow bean leaves",
+          "stunted beans",
+          "bean root damage",
+          "bean seedlings dying",
+          "small flies on bean stems"
+        ]
+      },
+      "treatment": {
+        "rw": [
+          "Kura ibihingwa byanduye cyane ubyite kure y'umurima.",
+          "Baza umujyanama ku muti wemewe wo kurwanya isazi y'ibishyimbo.",
+          "Ongera ifumbire n'ubushyuhe bw'amazi kugira ngo ibishyimbo bikomeye."
+        ],
+        "en": [
+          "Remove badly infested plants and destroy them away from the field.",
+          "Ask an extension worker about an approved bean fly treatment.",
+          "Improve soil fertility and watering so bean plants grow stronger."
+        ]
+      },
+      "prevention": {
+        "rw": [
+          "Hinga ibishyimbo mu gihe gikwiye.",
+          "Hindura ibihingwa mu murima buri mwaka.",
+          "Koresha imbuto zizewe kandi uteye ku ntera ikwiye."
+        ],
+        "en": [
+          "Plant beans at the right time.",
+          "Rotate crops in the field every season.",
+          "Use certified seed and correct spacing."
+        ]
+      }
+    },
+    {
+      "id": "banana_bacterial_wilt",
+      "name_rw": "Indwara y'igitoke (Banana Bacterial Wilt)",
+      "name_en": "Banana Bacterial Wilt",
+      "crops": {
+        "rw": ["ibitoke"],
+        "en": ["banana"]
+      },
+      "keywords": {
+        "rw": [
+          "igitoke",
+          "amataba y'umuhondo",
+          "ibishishwa by'igitoke",
+          "umutobe wera",
+          "kuraba",
+          "ibihingwa byuma",
+          "amababi y'umye",
+          "igitoke kiraba"
+        ],
+        "en": [
+          "banana bacterial wilt",
+          "yellow banana leaves",
+          "wilting banana",
+          "white sap from banana",
+          "banana bunch rotting",
+          "banana plant dies suddenly"
+        ]
+      },
+      "treatment": {
+        "rw": [
+          "Siba igitoke kirwaye ubyite kure y'umurima.",
+          "Sukura ibikoresho byose ukoresha mu murima buri gihe.",
+          "Baza umujyanama w'ubuhinzi vuba kugira ngo indwara itakwira."
+        ],
+        "en": [
+          "Remove and destroy the infected banana plant away from the field.",
+          "Clean all tools used in the field after every use.",
+          "Contact an extension worker quickly to stop the disease spreading."
+        ]
+      },
+      "prevention": {
+        "rw": [
+          "Koresha imbuto z'igitoke zizewe.",
+          "Sukura ibikoresho mbere y'uko ukoresha mu murima undi.",
+          "Kura ibihingwa birwaye vuba uko bishoboka."
+        ],
+        "en": [
+          "Use certified disease-free banana suckers.",
+          "Clean tools before moving to another field.",
+          "Remove infected plants as early as possible."
+        ]
+      }
+    },
+    {
+      "id": "potato_late_blight",
+      "name_rw": "Indwara y'ibirayi (Late Blight)",
+      "name_en": "Potato Late Blight",
+      "crops": {
+        "rw": ["ibirayi", "inyanya"],
+        "en": ["potato", "tomato"]
+      },
+      "keywords": {
+        "rw": [
+          "ibirayi",
+          "amababi y'ibihogo",
+          "ibibara by'ikijuju",
+          "ifu y'umweru",
+          "amababi y'umye",
+          "ubushyuhe n'imvura",
+          "ibibara byirabura ku mababi",
+          "ibirayi birwaye"
+        ],
+        "en": [
+          "potato late blight",
+          "dark spots on potato leaves",
+          "white mold on leaves",
+          "water soaked spots",
+          "potato leaves dying",
+          "tomato late blight"
+        ]
+      },
+      "treatment": {
+        "rw": [
+          "Kura amababi yanduye ubyite kure y'umurima.",
+          "Sasa umuti wemewe wo kurwanya late blight uko ibimera bikura.",
+          "Baza umujyanama ku muti wemewe n'igihe cyo kuwukoresha."
+        ],
+        "en": [
+          "Remove infected leaves and destroy them away from the field.",
+          "Apply an approved late blight fungicide as the crop grows.",
+          "Ask an extension worker which product and timing to use."
+        ]
+      },
+      "prevention": {
+        "rw": [
+          "Koresha imbuto z'ibirayi zizewe.",
+          "Tera ibirayi mu ntera ikwiye kugira ngo umwuka unyure.",
+          "Kura ibihingwa birwaye kandi utazongera kubyorora."
+        ],
+        "en": [
+          "Use certified disease-free potato seed.",
+          "Plant with correct spacing so air can circulate.",
+          "Remove infected plants and do not compost them."
+        ]
+      }
+    }
+  ]
+}
