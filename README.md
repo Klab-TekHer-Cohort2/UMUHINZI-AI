@@ -7,9 +7,11 @@ system understands the crop problem, diagnoses the pest, and replies with short
 spoken advice. When several farmers report the same pest in one sector, an
 outbreak alert is sent to nearby farmers and cooperatives.
 
-> **Status:** Stage 2 + Sunbird ASR. The server exposes `/health`, `/pests`,
-> `/diagnose` and `/asr`, and the Streamlit dashboard supports audio upload and
-> microphone recording. Voice/USSD webhooks and outbreak alerts come next.
+> **Status:** Stage 3 (webhooks). The server exposes `/health`, `/pests`,
+> `/diagnose`, `/asr`, `/register`, `/alerts`, `/reports`, plus the Africa's
+> Talking webhooks `/ussd` and `/voice`. Outbreak alerts are stored and logged
+> in dry-run mode. The Streamlit dashboard supports audio upload, microphone
+> recording and text diagnosis. All webhooks work with no API keys.
 
 ## Stack
 
@@ -33,10 +35,10 @@ umuhinzi-ai/
 │   ├── main.py          # app entry point and API routes
 │   ├── config.py        # env vars / settings
 │   ├── data/            # pests.json, training_data.json
-│   ├── db/              # database helpers (later)
-│   ├── i18n/            # Kinyarwanda text, all in rw.py
+│   ├── db/              # SQLite storage (hashed ids, reports, alerts)
+│   ├── i18n/            # Kinyarwanda text, all in rw.py (RW-CHECK markers)
 │   ├── ml/              # diagnosis, text cleaning, train.py, model.joblib
-│   └── services/        # ASR (mock + Sunbird), audio conversion, alerts (later)
+│   └── services/        # ASR, audio, alerts, webhooks (ussd.py, voice.py)
 ├── dashboard/           # Streamlit demo dashboard
 ├── tests/               # pytest tests
 ├── requirements.txt
@@ -124,7 +126,151 @@ Interactive API docs: <http://127.0.0.1:8000/docs>
 pytest
 ```
 
-## Stage 2: pest knowledge base and diagnosis
+47 tests cover diagnosis, ASR, storage/alerts, the dashboard and both webhooks.
+
+## HTTP endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service status, ASR backend and dry-run flags |
+| `GET` | `/pests` | The six-pest knowledge base (summary) |
+| `POST` | `/diagnose` | JSON text diagnosis + hashed report + outbreak check |
+| `POST` | `/asr` | Multipart audio upload -> transcription -> diagnosis |
+| `POST` | `/register` | Register farmer/cooperative (phone hashed) |
+| `GET` | `/alerts` | Stored outbreak alerts (active by default) |
+| `GET` | `/reports` | Recent reports (hashed reporter ids only) |
+| `POST` | `/ussd` | Africa's Talking USSD callback (form-encoded, plain text) |
+| `POST` | `/voice` | Africa's Talking voice callback (form-encoded, voice XML) |
+
+Interactive Swagger docs for all of them: <http://127.0.0.1:8000/docs>.
+
+## Africa's Talking webhooks (dry-run, no keys needed)
+
+Africa's Talking calls *us*, so no `AT_API_KEY` or Sunbird token is required to
+exercise the full flow. Reports use the existing diagnosis and outbreak
+services: after three reports of the same pest in the same sector, one alert is
+stored and logged as `DRY-RUN` (no SMS is sent). Phone numbers are hashed with
+`storage.hash_identifier()` before they reach SQLite, and callbacks are logged
+with hashed session ids only - never raw phone numbers, full recording URLs or
+tokens.
+
+### USSD menu map
+
+Africa's Talking sends the whole path in `text`, using `*` as a separator.
+Keep the same `sessionId` for every step of one session.
+
+| `text` value | Meaning |
+| --- | --- |
+| `""` | Welcome / choose language |
+| `1` | Kinyarwanda (`2` = English notice, menus stay Kinyarwanda in this demo) |
+| `1*1` | District Gasabo (`2` Kicukiro, `3` Nyarugenge, `4` type a name) |
+| `1*1*1` | Sector Kacyiru (`2` Remera, `3` Kimihurura, `4` type a name) |
+| `1*1*1*1` | Main menu: 1 describe a problem, 2 pest advice, 3 sector alerts |
+| `1*1*1*1*1` | Pick symptom 1 from the numbered list -> diagnosis + `END` advice |
+| `1*1*1*1*7` then `1*1*1*1*7<space>your symptoms` | Type your own short symptom |
+| `1*1*1*2*4` | Advice for pest 4 (Bean Fly) from the six-pest list |
+| `1*1*1*3` | Current active alerts in Kacyiru |
+
+Every response starts with `CON ` (continue) or `END ` (finish) and is at most
+182 characters.
+
+### Voice call map
+
+1. First callback: Kinyarwanda greeting + `GetDigits` menu (`1` describe a
+   problem, `2` pest advice, `3` sector alerts).
+2. Next callbacks: pick district and sector with `GetDigits`.
+3. Option `1`: a `Record` action; Africa's Talking posts `recordingUrl` back to
+   `/voice`. The backend downloads it, calls the existing `transcribe()` ASR
+   step, diagnoses the text and plays short advice with `<Say>`. Empty
+   transcription -> `<Say>` asking the farmer to repeat + another `Record`.
+4. Option `2`: numbered pest list, then advice. Option `3`: active sector
+   alerts. Both end with `<Say>` + `<Hangup>`.
+5. `isActive=0` ends the call and clears the session.
+
+### Test /ussd locally from the /docs page
+
+This is the quickest way to simulate a farmer without a phone:
+
+1. Start the backend: `uvicorn app.main:app --reload`.
+2. Open <http://127.0.0.1:8000/docs> and expand **POST /ussd**.
+3. Click **Try it out**. The form fields are `sessionId`, `serviceCode`,
+   `phoneNumber` and `text` (Swagger UI sends them as form-encoded data).
+4. Use the **same** `sessionId` for all calls, e.g. `docs-demo`. Use
+   `serviceCode` `*123#` and any fake `phoneNumber` (e.g. `+250788123456`).
+5. Click **Execute** once for each `text` value, in this order:
+
+   ```
+   (empty)
+   1
+   1*1
+   1*1*1
+   1*1*1*1
+   1*1*1*1*1
+   ```
+
+6. The last response is an `END ` message with Kinyarwanda advice. To try the
+   other branches, use `1*1*1*1*7` then
+   `1*1*1*1*7*isazi y'ibishyimbo amababi y'umuhondo` (typed symptom),
+   `1*1*1*2*4` (pest advice), or `1*1*1*3` (alerts).
+7. Check <http://127.0.0.1:8000/reports> - the reporter is a SHA-256 hash, not
+   the phone number you entered. Use a new `sessionId` to start over.
+
+### PowerShell and curl examples
+
+```powershell
+# First USSD step (text is empty)
+$ussd = @{
+    sessionId   = "demo-1"
+    serviceCode = "*123#"
+    phoneNumber = "+250788123456"
+    text        = ""
+}
+Invoke-RestMethod http://127.0.0.1:8000/ussd -Method Post -Body $ussd
+
+# Continue the same session with: 1, 1*1, 1*1*1, 1*1*1*1, 1*1*1*1*1
+$ussd.text = "1*1*1*1*1"
+Invoke-RestMethod http://127.0.0.1:8000/ussd -Method Post -Body $ussd
+
+# Voice menu step (press 1 for "describe a problem")
+$voice = @{
+    sessionId    = "call-1"
+    isActive     = "1"
+    callerNumber = "+250788123456"
+    dtmfDigits   = "1"
+    recordingUrl = ""
+}
+Invoke-RestMethod http://127.0.0.1:8000/voice -Method Post -Body $voice
+```
+
+curl.exe (ships with Windows) equivalent:
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8000/ussd `
+  -d "sessionId=demo-2" -d "serviceCode=*123#" `
+  -d "phoneNumber=%2B250788123456" -d "text=1*1*1*1*1"
+```
+
+### Connect the Africa's Talking sandbox with ngrok
+
+1. Start the backend in one terminal:
+   `uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+2. Install ngrok (for example `winget install ngrok.ngrok`), sign in, then run
+   `ngrok http 8000` in a second terminal.
+3. Copy the HTTPS forwarding URL, e.g.
+   `https://abcd-1234.ngrok-free.app`. It changes when ngrok restarts, so the
+   callback URLs must be updated after each restart.
+4. In the Africa's Talking sandbox dashboard
+   (<https://account.africastalking.com>):
+   - **USSD**: create/select a service code (for example `*123#`) and set its
+     callback URL to `https://YOUR-TUNNEL/ussd`.
+   - **Voice**: set the inbound call callback URL to
+     `https://YOUR-TUNNEL/voice`.
+5. Use the sandbox's USSD simulator / test number to dial the code, or call the
+   sandbox voice number. Every step appears in the uvicorn log as a hashed
+   session id; `/reports` and `/alerts` show the stored result.
+6. You do **not** need `AT_API_KEY` for inbound webhooks. Add sandbox
+   credentials to `.env` only if you later want the app to send outbound SMS or
+   place calls. Keep secrets out of git and out of logs.
 
 - Knowledge base: `app/data/pests.json` (6 pests, Kinyarwanda + English).
 - Training phrases: `app/data/training_data.json`.

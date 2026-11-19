@@ -240,6 +240,15 @@ def diagnose(text: str) -> DiagnosisResult:
     return _unknown(best_effort)
 
 
+def result_for_pest(pest_id: str) -> DiagnosisResult:
+    """Build a confident result when the farmer picked a pest from a menu.
+
+    This reuses the same knowledge base and reply builders as text diagnosis,
+    but skips the classifier because the farmer already named the pest.
+    """
+    return _make_result(pest_id, 1.0, "menu")
+
+
 def build_reply(result: DiagnosisResult) -> str:
     """Build the short Kinyarwanda sentence spoken/read back to the farmer."""
     if not result.pest_id:
@@ -253,6 +262,22 @@ def build_reply(result: DiagnosisResult) -> str:
         name=result.name_rw,
         steps=" ".join(treatment_steps),
         prevention=prevention_tips[0] if prevention_tips else "",
+    )
+
+
+def build_short_reply(result: DiagnosisResult) -> str:
+    """Shorter reply for USSD (182-char limit) and for short voice prompts."""
+    if not result.pest_id:
+        return rw.SHORT_LOW_CONFIDENCE_REPLY
+
+    pest = get_pest(result.pest_id)
+    treatment = pest["treatment"]["rw"][0] if pest["treatment"]["rw"] else ""
+    prevention = pest["prevention"]["rw"][0] if pest["prevention"]["rw"] else ""
+
+    return rw.SHORT_DIAGNOSIS_REPLY.format(
+        name=result.name_rw,
+        step=treatment,
+        prevention=prevention,
     )
 
 

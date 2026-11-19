@@ -8,16 +8,19 @@ Current endpoints:
 - `POST /register` register a farmer or cooperative (phone is hashed)
 - `GET  /alerts`   outbreak alerts (active by default)
 - `GET  /reports`  recent (hashed) diagnoses for the dashboard
+- `POST /ussd`     Africa's Talking USSD menu (form-encoded, text/plain reply)
+- `POST /voice`    Africa's Talking voice callbacks (form-encoded, XML reply)
 
-`/voice` and `/ussd` (Africa's Talking webhooks) are added in the next stages.
+Both webhooks work without API keys: no SMS is sent in dry-run mode.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Literal
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from app import __version__, config
@@ -25,7 +28,7 @@ from app.db import storage
 from app.i18n import rw
 from app.ml.diagnosis import build_reply, diagnose, diagnose_and_reply, list_pests
 from app.services import alerts as alert_service
-from app.services import asr
+from app.services import asr, ussd, voice
 
 logger = logging.getLogger(__name__)
 
@@ -226,3 +229,61 @@ def transcribe_audio(audio: UploadFile = File(...)) -> dict:
         }
 
     return {"transcription": text, **diagnose_and_reply(text)}
+
+
+@app.post("/ussd")
+def ussd_webhook(
+    session_id: str = Form("", alias="sessionId", description="Africa's Talking session id"),
+    service_code: str = Form("", alias="serviceCode", description="USSD short code"),
+    phone_number: str = Form("", alias="phoneNumber", description="Caller number (hashed, never logged)"),
+    text: str = Form("", alias="text", description="Full menu path, e.g. 1*1*1*1"),
+) -> Response:
+    """Africa's Talking USSD callback.
+
+    Replies are plain text starting with ``CON `` or ``END `` and are capped at
+    182 characters. ``phoneNumber`` is hashed before it reaches the database.
+    """
+    logger.info(
+        "USSD callback session=%s service=%s steps=%s",
+        storage.hash_identifier(session_id),
+        service_code,
+        len([part for part in text.split("*") if part.strip()]),
+    )
+    reply = ussd.handle(session_id, phone_number, text)
+    return Response(content=reply, media_type="text/plain; charset=utf-8")
+
+
+@app.post("/voice", name="voice_webhook")
+def voice_webhook(
+    request: Request,
+    session_id: str = Form("", alias="sessionId", description="Africa's Talking session id"),
+    is_active: str = Form("", alias="isActive", description="1 while the call is active, 0 when it ends"),
+    caller_number: str = Form("", alias="callerNumber", description="Caller number (hashed, never logged)"),
+    dtmf_digits: str = Form("", alias="dtmfDigits", description="Digits pressed by the farmer"),
+    recording_url: str = Form("", alias="recordingUrl", description="URL of the farmer's recording"),
+) -> Response:
+    """Africa's Talking voice callback returning voice XML.
+
+    The first call plays a Kinyarwanda greeting and menu. A ``Record`` action
+    posts the recording URL back here; we download it, run `transcribe()` and
+    diagnose the text. If speech recognition is empty we ask the farmer to
+    repeat. No API key is required for this dry-run flow.
+    """
+    callback_url = str(request.url_for("voice_webhook"))
+    logger.info(
+        "Voice callback session=%s isActive=%s dtmf=%s has_recording=%s recording_host=%s",
+        storage.hash_identifier(session_id),
+        is_active,
+        bool(dtmf_digits),
+        bool(recording_url),
+        urlparse(recording_url).netloc if recording_url else "-",
+    )
+    xml = voice.handle(
+        session_id=session_id,
+        caller_number=caller_number,
+        is_active=is_active,
+        dtmf_digits=dtmf_digits,
+        recording_url=recording_url,
+        callback_url=callback_url,
+    )
+    return Response(content=xml, media_type="application/xml")
