@@ -44,17 +44,22 @@ if not DB_FILE.is_absolute():
     DB_FILE = BASE_DIR / DB_FILE
 
 # --- ASR / TTS backends ---
-# `mock` is the safe default. Set ASR_BACKEND=sunbird in `.env` to use real
-# Kinyarwanda speech recognition.
+# `mock` is the safe default for both. Set ASR_BACKEND=sunbird and/or
+# TTS_BACKEND=sunbird in `.env` to use real Kinyarwanda speech services.
 ASR_BACKEND = os.getenv("ASR_BACKEND", "mock").strip().lower()
 TTS_BACKEND = os.getenv("TTS_BACKEND", "mock").strip().lower()
 
-# --- Sunbird AI speech-to-text (free developer tier) ---
-# Token from https://api.sunbird.ai/keys . Never commit or log this value.
+# --- Sunbird AI speech services (free developer tier) ---
+# One token is shared by STT and TTS. Never commit or log this value.
 SUNBIRD_API_TOKEN = os.getenv("SUNBIRD_API_TOKEN", "").strip()
 SUNBIRD_STT_URL = os.getenv(
     "SUNBIRD_STT_URL", "https://api.sunbird.ai/tasks/audio/transcriptions"
 ).strip()
+SUNBIRD_TTS_URL = os.getenv(
+    "SUNBIRD_TTS_URL", "https://api.sunbird.ai/tasks/audio/speech"
+).strip()
+# Optional speaker name/tag; when empty Sunbird picks a voice for the language.
+SUNBIRD_TTS_VOICE = os.getenv("SUNBIRD_TTS_VOICE", "").strip()
 SUNBIRD_TIMEOUT_SECONDS = _int("SUNBIRD_TIMEOUT_SECONDS", 45)
 
 

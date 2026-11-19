@@ -9,7 +9,7 @@ from app import config
 from app.db import storage
 from app.main import app
 from app.services import alerts as alert_service
-from app.services import asr, voice, webhooks
+from app.services import asr, tts, voice, webhooks
 
 client = TestClient(app)
 PHONE = "+250788123456"
@@ -23,8 +23,10 @@ def voice_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "OUTBREAK_WINDOW_DAYS", 7)
     storage.init_db()
     webhooks.clear_all_sessions()
+    tts.clear_cache()
     yield
     webhooks.clear_all_sessions()
+    tts.clear_cache()
 
 
 def post(session: str = "voice-1", **overrides):
@@ -201,3 +203,23 @@ def test_inactive_call_returns_empty_response(voice_db):
     assert result.status_code == 200
     assert "<Response" in result.text
     assert webhooks.get_session(webhooks.hashed_key("voice-1", PHONE)).stage == "start"
+
+
+def test_voice_uses_play_when_tts_audio_available(voice_db, monkeypatch):
+    monkeypatch.setattr(config, "TTS_BACKEND", "sunbird")
+    monkeypatch.setattr(
+        tts,
+        "synthesize",
+        lambda text, **kwargs: tts.SynthesizedAudio(b"fake-wav", "audio/wav"),
+    )
+
+    post()
+    post(dtmfDigits="2")
+    post(dtmfDigits="1")
+    post(dtmfDigits="1")
+    result = post(dtmfDigits="4")
+
+    assert "<Play" in result.text
+    assert 'url="http://testserver/tts/audio/' in result.text
+    assert "<Say>" not in result.text
+    assert "<Hangup" in result.text

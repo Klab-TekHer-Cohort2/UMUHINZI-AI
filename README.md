@@ -7,11 +7,12 @@ system understands the crop problem, diagnoses the pest, and replies with short
 spoken advice. When several farmers report the same pest in one sector, an
 outbreak alert is sent to nearby farmers and cooperatives.
 
-> **Status:** Stage 3 (webhooks). The server exposes `/health`, `/pests`,
-> `/diagnose`, `/asr`, `/register`, `/alerts`, `/reports`, plus the Africa's
-> Talking webhooks `/ussd` and `/voice`. Outbreak alerts are stored and logged
-> in dry-run mode. The Streamlit dashboard supports audio upload, microphone
-> recording and text diagnosis. All webhooks work with no API keys.
+> **Status:** Stage 4 (speech in both directions). The server exposes `/health`,
+> `/pests`, `/diagnose`, `/asr`, `/tts`, `/register`, `/alerts`, `/reports`, plus
+> the Africa's Talking webhooks `/ussd` and `/voice`. Kinyarwanda text-to-speech
+> is available via Sunbird (or a silent mock fallback). Outbreak alerts are
+> stored and logged in dry-run mode. The Streamlit dashboard shows an audio
+> player for the diagnosis reply. All webhooks work with no API keys.
 
 ## Stack
 
@@ -21,6 +22,7 @@ outbreak alert is sent to nearby farmers and cooperatives.
 | Telephony + USSD + SMS | Africa's Talking developer sandbox (free) |
 | Machine learning | scikit-learn (TF-IDF), lightweight |
 | Speech recognition | Sunbird AI STT (free developer tier) + mock fallback |
+| Speech synthesis | Sunbird AI TTS (Kinyarwanda, `kin`) + mock fallback |
 | Storage | SQLite |
 | Demo dashboard | Streamlit |
 | Tunnel for webhooks | ngrok or cloudflared (free tier) |
@@ -38,7 +40,7 @@ umuhinzi-ai/
 │   ├── db/              # SQLite storage (hashed ids, reports, alerts)
 │   ├── i18n/            # Kinyarwanda text, all in rw.py (RW-CHECK markers)
 │   ├── ml/              # diagnosis, text cleaning, train.py, model.joblib
-│   └── services/        # ASR, audio, alerts, webhooks (ussd.py, voice.py)
+│   └── services/        # ASR, TTS, audio, alerts, webhooks (ussd.py, voice.py)
 ├── dashboard/           # Streamlit demo dashboard
 ├── tests/               # pytest tests
 ├── requirements.txt
@@ -112,11 +114,12 @@ uvicorn app.main:app --reload
 Open <http://127.0.0.1:8000/health> — you should see something like:
 
 ```json
-{"status":"ok","africastalking_configured":false}
+{"status":"ok","africastalking_configured":false,"asr_backend":"mock","tts_backend":"mock","sunbird_configured":false}
 ```
 
 `africastalking_configured` is `false` when no real API key is in `.env`
-(dry-run mode) and `true` once a real sandbox key is loaded.
+(dry-run mode) and `true` once a real sandbox key is loaded. `tts_backend`
+shows whether spoken replies use Sunbird or the silent mock fallback.
 
 Interactive API docs: <http://127.0.0.1:8000/docs>
 
@@ -126,16 +129,18 @@ Interactive API docs: <http://127.0.0.1:8000/docs>
 pytest
 ```
 
-47 tests cover diagnosis, ASR, storage/alerts, the dashboard and both webhooks.
+58 tests cover diagnosis, ASR, TTS, storage/alerts, the dashboard and both webhooks.
 
 ## HTTP endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Service status, ASR backend and dry-run flags |
+| `GET` | `/health` | Service status, ASR/TTS backends and dry-run flags |
 | `GET` | `/pests` | The six-pest knowledge base (summary) |
 | `POST` | `/diagnose` | JSON text diagnosis + hashed report + outbreak check |
 | `POST` | `/asr` | Multipart audio upload -> transcription -> diagnosis |
+| `POST` | `/tts` | Kinyarwanda JSON text -> raw audio bytes |
+| `GET` | `/tts/audio/{key}` | Short-lived cached audio used by `<Play>` |
 | `POST` | `/register` | Register farmer/cooperative (phone hashed) |
 | `GET` | `/alerts` | Stored outbreak alerts (active by default) |
 | `GET` | `/reports` | Recent reports (hashed reporter ids only) |
@@ -181,11 +186,15 @@ Every response starts with `CON ` (continue) or `END ` (finish) and is at most
 2. Next callbacks: pick district and sector with `GetDigits`.
 3. Option `1`: a `Record` action; Africa's Talking posts `recordingUrl` back to
    `/voice`. The backend downloads it, calls the existing `transcribe()` ASR
-   step, diagnoses the text and plays short advice with `<Say>`. Empty
-   transcription -> `<Say>` asking the farmer to repeat + another `Record`.
+   step, diagnoses the text and plays short advice. Empty transcription -> a
+   prompt asking the farmer to repeat + another `Record`.
 4. Option `2`: numbered pest list, then advice. Option `3`: active sector
-   alerts. Both end with `<Say>` + `<Hangup>`.
-5. `isActive=0` ends the call and clears the session.
+   alerts. Both end with spoken advice + `<Hangup>`.
+5. Spoken replies use `<Play url=".../tts/audio/{key}">` when TTS audio is
+   available, and fall back to `<Say>` with `TTS_BACKEND=mock` (or a Sunbird
+   error). The audio URL is a short-lived in-memory cache entry; behind ngrok it
+   is publicly reachable by Africa's Talking.
+6. `isActive=0` ends the call and clears the session.
 
 ### Test /ussd locally from the /docs page
 
@@ -240,6 +249,12 @@ $voice = @{
     recordingUrl = ""
 }
 Invoke-RestMethod http://127.0.0.1:8000/voice -Method Post -Body $voice
+
+# Text-to-speech: save the Kinyarwanda reply as a WAV file.
+# With TTS_BACKEND=mock the file is empty and X-Audio-Available is 0.
+$tts = @{ text = "Inyo y'ibigori: Kura udukoko ku mababi." } | ConvertTo-Json
+Invoke-WebRequest http://127.0.0.1:8000/tts -Method Post `
+  -ContentType "application/json" -Body $tts -OutFile reply.wav
 ```
 
 curl.exe (ships with Windows) equivalent:
@@ -248,6 +263,10 @@ curl.exe (ships with Windows) equivalent:
 curl.exe -X POST http://127.0.0.1:8000/ussd `
   -d "sessionId=demo-2" -d "serviceCode=*123#" `
   -d "phoneNumber=%2B250788123456" -d "text=1*1*1*1*1"
+
+curl.exe -X POST http://127.0.0.1:8000/tts `
+  -H "Content-Type: application/json" `
+  -d "{\"text\": \"Inyo y'ibigori: Kura udukoko.\"}" -o reply.wav
 ```
 
 ### Connect the Africa's Talking sandbox with ngrok
@@ -271,6 +290,8 @@ curl.exe -X POST http://127.0.0.1:8000/ussd `
 6. You do **not** need `AT_API_KEY` for inbound webhooks. Add sandbox
    credentials to `.env` only if you later want the app to send outbound SMS or
    place calls. Keep secrets out of git and out of logs.
+
+## Stage 2: pest knowledge base and diagnosis
 
 - Knowledge base: `app/data/pests.json` (6 pests, Kinyarwanda + English).
 - Training phrases: `app/data/training_data.json`.
@@ -318,15 +339,47 @@ Speech recognition is behind one function: `transcribe(audio)` in
 
 ```env
 ASR_BACKEND=sunbird
+TTS_BACKEND=sunbird
 SUNBIRD_API_TOKEN=paste_your_token_here
 SUNBIRD_TIMEOUT_SECONDS=45
 ```
 
 4. Restart the backend. `/health` should show
-   `"asr_backend": "sunbird", "sunbird_configured": true`.
+   `"asr_backend": "sunbird", "tts_backend": "sunbird",
+   "sunbird_configured": true`.
 
-The token is never sent to the dashboard and is never logged. If the API returns
-401/403, create a fresh token at <https://api.sunbird.ai/keys>.
+The token is shared by STT and TTS, is never sent to the dashboard and is never
+logged. If the API returns 401/403, create a fresh token at
+<https://api.sunbird.ai/keys>.
+
+## Text-to-speech (Sunbird AI)
+
+Speech synthesis lives behind `synthesize(text)` in `app/services/tts.py`. The
+backend is chosen by `TTS_BACKEND` in `.env`:
+
+- `mock` (default) — no network and empty audio. `/tts` returns an empty body
+  with `X-Audio-Available: 0`, the dashboard hides the player, and `/voice`
+  uses `<Say>` instead of `<Play>`.
+- `sunbird` — calls `POST https://api.sunbird.ai/tasks/audio/speech` with
+  `language=kin` and `response_mode=stream`, using the same
+  `SUNBIRD_API_TOKEN` as STT. If Sunbird returns a signed `audio_url` instead of
+  raw bytes, the backend downloads it. Missing/expired tokens, timeouts and bad
+  responses are logged as warnings (never the token or signed URL) and fall
+  back to mock.
+
+Optional settings in `.env`:
+
+```env
+TTS_BACKEND=sunbird
+SUNBIRD_TTS_URL=https://api.sunbird.ai/tasks/audio/speech
+# SUNBIRD_TTS_VOICE=your_preferred_voice
+```
+
+`POST /tts` returns the audio bytes directly with the correct `Content-Type`
+(e.g. `audio/wav`). The same byte array is cached for one hour under a SHA-256
+key returned in `X-Audio-Key`; `GET /tts/audio/{key}` serves it to Africa's
+Talking so `<Play>` can fetch it during a call. Clear the cache by restarting
+the server.
 
 ### Audio conversion (optional)
 
@@ -364,7 +417,8 @@ The dashboard opens at <http://localhost:8501>. It supports:
 - audio file upload,
 - microphone recording (Streamlit 1.38+),
 - a text-only demo tab,
-- transcription, diagnosis, confidence and the Kinyarwanda reply.
+- transcription, diagnosis, confidence and the Kinyarwanda reply,
+- an audio player that speaks the reply (when `TTS_BACKEND=sunbird` works).
 
 Use the sidebar to check the backend connection. The dashboard reads the backend
 URL from `UMUHINZI_API_URL` (default `http://127.0.0.1:8000`).

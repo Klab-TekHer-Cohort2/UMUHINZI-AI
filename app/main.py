@@ -5,6 +5,8 @@ Current endpoints:
 - `GET  /pests`    the pest knowledge base (summary)
 - `POST /diagnose` text symptom description -> pest + Kinyarwanda reply
 - `POST /asr`      audio upload -> Sunbird/mock transcription -> diagnosis
+- `POST /tts`      Kinyarwanda text -> audio (Sunbird/mock)
+- `GET  /tts/audio/{key}` cached audio used by Africa's Talking `<Play>`
 - `POST /register` register a farmer or cooperative (phone is hashed)
 - `GET  /alerts`   outbreak alerts (active by default)
 - `GET  /reports`  recent (hashed) diagnoses for the dashboard
@@ -28,7 +30,7 @@ from app.db import storage
 from app.i18n import rw
 from app.ml.diagnosis import build_reply, diagnose, diagnose_and_reply, list_pests
 from app.services import alerts as alert_service
-from app.services import asr, ussd, voice
+from app.services import asr, tts, ussd, voice
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,23 @@ class DiagnoseRequest(BaseModel):
     )
 
 
+class TTSRequest(BaseModel):
+    """Body for `POST /tts`."""
+
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Kinyarwanda text to speak.",
+        examples=["Inyo y'ibigori: Kura udukoko ku mababi."],
+    )
+    language: str = Field(
+        "kin",
+        max_length=10,
+        description="ISO 639-3 language code (kin = Kinyarwanda).",
+    )
+
+
 class RegisterRequest(BaseModel):
     """Body for `POST /register` (farmers and cooperatives)."""
 
@@ -109,6 +128,7 @@ def health() -> dict:
         "status": "ok",
         "africastalking_configured": config.africastalking_is_configured(),
         "asr_backend": config.ASR_BACKEND,
+        "tts_backend": config.TTS_BACKEND,
         # Boolean only - the Sunbird token itself is never returned.
         "sunbird_configured": config.sunbird_is_configured(),
     }
@@ -229,6 +249,41 @@ def transcribe_audio(audio: UploadFile = File(...)) -> dict:
         }
 
     return {"transcription": text, **diagnose_and_reply(text)}
+
+
+@app.post("/tts")
+def synthesize_speech(request: TTSRequest) -> Response:
+    """Turn text into audio using the configured TTS backend.
+
+    Returns raw audio bytes. With `TTS_BACKEND=mock` the body is empty and the
+    `X-Audio-Available` header is `0`; callers should fall back to text/Say.
+    """
+    audio = tts.synthesize(request.text, language=request.language)
+    available = "1" if audio.data else "0"
+    headers = {
+        "X-TTS-Backend": config.TTS_BACKEND or "mock",
+        "X-Audio-Available": available,
+    }
+
+    if audio.data:
+        key = tts.cache_audio(request.text, audio)
+        headers["X-Audio-Key"] = key
+        return Response(
+            content=audio.data,
+            media_type=audio.content_type,
+            headers=headers,
+        )
+
+    return Response(content=b"", media_type="audio/wav", headers=headers)
+
+
+@app.get("/tts/audio/{key}")
+def get_cached_tts_audio(key: str) -> Response:
+    """Serve a short-lived cached TTS file for Africa's Talking `<Play>`."""
+    cached = tts.get_cached_audio(key)
+    if cached is None:
+        raise HTTPException(status_code=404, detail="Audio not found or expired")
+    return Response(content=cached.data, media_type=cached.content_type)
 
 
 @app.post("/ussd")

@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from xml.etree import ElementTree as ET
 
 import requests
 
 from app.i18n import rw
-from app.services import asr, webhooks
+from app.services import asr, tts, webhooks
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,24 @@ def _hangup() -> ET.Element:
     return ET.Element("Hangup")
 
 
+def _base_url(callback_url: str) -> str:
+    parts = urlparse(callback_url)
+    return urlunparse((parts.scheme, parts.netloc, "", "", "", ""))
+
+
+def _speak(text: str, callback_url: str) -> list[ET.Element]:
+    """Return `<Play>` with generated audio, or `<Say>` when audio is unavailable."""
+    try:
+        audio = tts.synthesize(text)
+        if audio.data:
+            key = tts.cache_audio(text, audio)
+            url = f"{_base_url(callback_url)}/tts/audio/{key}"
+            return [ET.Element("Play", {"url": url})]
+    except Exception as exc:
+        logger.warning("TTS unavailable (%s); falling back to Say", type(exc).__name__)
+    return [_say(text)]
+
+
 def _response(children: list[ET.Element]) -> str:
     root = ET.Element("Response")
     root.extend(children)
@@ -98,6 +116,7 @@ def _finish(
     state: webhooks.SessionState,
     session_key: str,
     caller_number: str | None,
+    callback_url: str,
 ) -> str:
     result, alert = webhooks.process_report(
         text=text,
@@ -108,7 +127,7 @@ def _finish(
     )
     webhooks.clear_session(session_key)
     reply = f"{webhooks.advice_text(result, alert)} {rw.VOICE_GOODBYE}"
-    return _response([_say(reply), _hangup()])
+    return _response([*_speak(reply, callback_url), _hangup()])
 
 
 def _handle_recording(
@@ -123,7 +142,7 @@ def _handle_recording(
         audio, filename, content_type = download_recording(recording_url)
     except Exception as exc:
         logger.warning("Could not fetch recording (%s)", type(exc).__name__)
-        return _response([_say(rw.VOICE_REPEAT), _record(callback_url)])
+        return _response([*_speak(rw.VOICE_REPEAT, callback_url), _record(callback_url)])
 
     try:
         text = asr.transcribe(audio, filename=filename, content_type=content_type)
@@ -132,7 +151,7 @@ def _handle_recording(
         text = ""
 
     if not text:
-        return _response([_say(rw.VOICE_REPEAT), _record(callback_url)])
+        return _response([*_speak(rw.VOICE_REPEAT, callback_url), _record(callback_url)])
 
     return _finish(
         text=text,
@@ -140,6 +159,7 @@ def _handle_recording(
         state=state,
         session_key=session_key,
         caller_number=caller_number,
+        callback_url=callback_url,
     )
 
 
@@ -149,7 +169,7 @@ def _after_location(
 ) -> str:
     if state.pending == "1":
         state.stage = "record"
-        return _response([_say(rw.VOICE_RECORD), _record(callback_url)])
+        return _response([*_speak(rw.VOICE_RECORD, callback_url), _record(callback_url)])
 
     if state.pending == "2":
         state.stage = "pest"
@@ -160,7 +180,7 @@ def _after_location(
     if state.pending == "3":
         reply = f"{webhooks.alert_summary(state.sector)} {rw.VOICE_GOODBYE}"
         webhooks.clear_session(session_key)
-        return _response([_say(reply), _hangup()])
+        return _response([*_speak(reply, callback_url), _hangup()])
 
     state.stage = "menu"
     return _response([_say(rw.VOICE_MENU), _get_digits(rw.VOICE_MENU, callback_url)])
@@ -199,7 +219,7 @@ def handle(
         state.stage = "menu"
         return _response(
             [
-                _say(rw.VOICE_WELCOME),
+                *_speak(rw.VOICE_WELCOME, callback_url),
                 _say(rw.VOICE_MENU),
                 _get_digits(rw.VOICE_MENU, callback_url),
             ]
@@ -247,10 +267,11 @@ def handle(
                 state=state,
                 session_key=session_key,
                 caller_number=caller_number,
+                callback_url=callback_url,
             )
         return _response(
             [_say(rw.VOICE_PESTS), _get_digits(rw.VOICE_PESTS, callback_url)]
         )
 
     # stage == "record": waiting for the recording callback.
-    return _response([_say(rw.VOICE_RECORD), _record(callback_url)])
+    return _response([*_speak(rw.VOICE_RECORD, callback_url), _record(callback_url)])

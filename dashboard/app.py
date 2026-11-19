@@ -5,7 +5,7 @@ Run from the project folder:
     streamlit run dashboard/app.py
 
 The dashboard talks to the FastAPI backend over HTTP. It never sees the
-Sunbird token: speech recognition happens on the backend.
+Sunbird token: speech recognition and speech synthesis happen on the backend.
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ def check_backend(api_url: str) -> None:
         return
 
     st.success(
-        f"Backend connected. ASR backend: **{health.get('asr_backend', 'unknown')}**"
+        f"Backend connected. ASR backend: **{health.get('asr_backend', 'unknown')}**, "
+        f"TTS backend: **{health.get('tts_backend', 'unknown')}**"
     )
     if health.get("asr_backend") == "sunbird" and not health.get(
         "sunbird_configured"
@@ -51,10 +52,34 @@ def check_backend(api_url: str) -> None:
             "ASR_BACKEND=sunbird but SUNBIRD_API_TOKEN is empty in `.env`. "
             "Requests will fall back to mock (asking the farmer to repeat)."
         )
+    if health.get("tts_backend") == "sunbird" and not health.get(
+        "sunbird_configured"
+    ):
+        st.warning(
+            "TTS_BACKEND=sunbird but SUNBIRD_API_TOKEN is empty in `.env`. "
+            "No audio player will be shown."
+        )
 
 
-def show_result(payload: dict) -> None:
-    """Render transcription, diagnosis and the Kinyarwanda reply."""
+@st.cache_data(show_spinner=False)
+def fetch_tts(api_url: str, text: str) -> tuple[bytes, str] | None:
+    """Ask the backend to speak the Kinyarwanda reply; None means no audio."""
+    try:
+        response = requests.post(f"{api_url}/tts", json={"text": text}, timeout=60)
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    if response.headers.get("X-Audio-Available") == "0" or not response.content:
+        return None
+    content_type = (
+        response.headers.get("Content-Type", "").split(";")[0].strip() or "audio/wav"
+    )
+    return response.content, content_type
+
+
+def show_result(api_url: str, payload: dict) -> None:
+    """Render transcription, diagnosis, audio and the Kinyarwanda reply."""
     st.subheader("Transcription")
     transcription = payload.get("transcription") or ""
     if transcription:
@@ -76,8 +101,17 @@ def show_result(payload: dict) -> None:
             f"**Method:** {diagnosis.get('method') or '-'}"
         )
 
+    reply = payload.get("reply_rw") or ""
+    with st.spinner("Preparing audio..."):
+        spoken = fetch_tts(api_url, reply) if reply else None
+
     st.subheader("Reply played to the farmer")
-    st.info(payload.get("reply_rw") or "(no reply)")
+    st.info(reply or "(no reply)")
+    if spoken is not None:
+        audio_bytes, content_type = spoken
+        st.audio(audio_bytes, format=content_type)
+    elif reply:
+        st.caption("TTS audio unavailable (mock backend or Sunbird error).")
 
     with st.expander("Raw JSON (for debugging)"):
         st.json(payload)
@@ -156,7 +190,7 @@ with audio_tab:
             except ValueError:
                 st.error("The backend returned an invalid response.")
             else:
-                show_result(result)
+                show_result(api_url, result)
 
 with text_tab:
     st.subheader("Type a symptom description")
@@ -198,6 +232,7 @@ with text_tab:
             st.error("The backend returned an invalid response.")
         else:
             show_result(
+                api_url,
                 {
                     "transcription": result.get("input", text),
                     "diagnosis": result.get("diagnosis"),
