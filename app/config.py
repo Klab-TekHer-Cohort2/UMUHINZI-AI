@@ -44,10 +44,14 @@ if not DB_FILE.is_absolute():
     DB_FILE = BASE_DIR / DB_FILE
 
 # --- ASR / TTS backends ---
-# `mock` is the safe default for both. Set ASR_BACKEND=sunbird and/or
+# `mock` is the safe default for both. Set ASR_BACKEND=sunbird/nvidia and/or
 # TTS_BACKEND=sunbird in `.env` to use real Kinyarwanda speech services.
 ASR_BACKEND = os.getenv("ASR_BACKEND", "mock").strip().lower()
+ASR_FALLBACK = os.getenv("ASR_FALLBACK", "sunbird").strip().lower()
 TTS_BACKEND = os.getenv("TTS_BACKEND", "mock").strip().lower()
+
+DEFAULT_NVIDIA_ASR_MODEL = "nvidia/stt_rw_conformer_transducer_large"
+NVIDIA_ASR_MODEL = os.getenv("NVIDIA_ASR_MODEL", DEFAULT_NVIDIA_ASR_MODEL).strip()
 
 # --- Sunbird AI speech services (free developer tier) ---
 # One token is shared by STT and TTS. Never commit or log this value.

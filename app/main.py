@@ -4,7 +4,7 @@ Current endpoints:
 - `GET  /health`   service + backend status
 - `GET  /pests`    the pest knowledge base (summary)
 - `POST /diagnose` text symptom description -> pest + Kinyarwanda reply
-- `POST /asr`      audio upload -> Sunbird/mock transcription -> diagnosis
+- `POST /asr`      audio upload -> Sunbird/NVIDIA/mock transcription -> diagnosis
 - `POST /tts`      Kinyarwanda text -> audio (Sunbird/mock)
 - `GET  /tts/audio/{key}` cached audio used by Africa's Talking `<Play>`
 - `POST /register` register a farmer or cooperative (phone is hashed)
@@ -128,6 +128,8 @@ def health() -> dict:
         "status": "ok",
         "africastalking_configured": config.africastalking_is_configured(),
         "asr_backend": config.ASR_BACKEND,
+        "asr_fallback": config.ASR_FALLBACK,
+        "nemo_available": asr.nemo_is_available(),
         "tts_backend": config.TTS_BACKEND,
         # Boolean only - the Sunbird token itself is never returned.
         "sunbird_configured": config.sunbird_is_configured(),

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import logging
+import sys
+import types
+import wave
+from pathlib import Path
 
 import pytest
 import requests
@@ -34,6 +39,65 @@ class FakeResponse:
 
     def json(self) -> dict:
         return self._payload
+
+
+def wav_bytes() -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(b"\x00\x00" * 160)
+    return buffer.getvalue()
+
+
+class FakeNemoModel:
+    def __init__(self, result: object):
+        self.result = result
+        self.calls: list[dict] = []
+
+    def transcribe(self, paths2audio_files):
+        self.calls.append({"paths2audio_files": list(paths2audio_files)})
+        return self.result
+
+
+class BrokenNemoModel:
+    def transcribe(self, paths2audio_files):
+        raise RuntimeError("decoder crashed")
+
+
+def prime_nemo_cache(monkeypatch, model: object) -> None:
+    monkeypatch.setattr(config, "NVIDIA_ASR_MODEL", asr.DEFAULT_NVIDIA_ASR_MODEL)
+    monkeypatch.setattr(asr, "_NEMO_MODEL", model)
+    monkeypatch.setattr(asr, "_NEMO_MODEL_NAME", asr.DEFAULT_NVIDIA_ASR_MODEL)
+
+
+def install_fake_nemo_modules(monkeypatch, from_pretrained) -> None:
+    nemo = types.ModuleType("nemo")
+    nemo.__path__ = []
+    collections = types.ModuleType("nemo.collections")
+    collections.__path__ = []
+    nemo_asr = types.ModuleType("nemo.collections.asr")
+    nemo_asr.__path__ = []
+    models = types.ModuleType("nemo.collections.asr.models")
+
+    class EncDecRNNTBPEModel:
+        @staticmethod
+        def from_pretrained(name):
+            return from_pretrained(name)
+
+    models.EncDecRNNTBPEModel = EncDecRNNTBPEModel
+    nemo_asr.models = models
+    collections.asr = nemo_asr
+    nemo.collections = collections
+
+    for name, module in {
+        "nemo": nemo,
+        "nemo.collections": collections,
+        "nemo.collections.asr": nemo_asr,
+        "nemo.collections.asr.models": models,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
 
 
 def test_sunbird_success_sends_expected_request(monkeypatch):
@@ -127,6 +191,104 @@ def test_dispatcher_falls_back_to_mock(monkeypatch, caplog):
     assert FAKE_TOKEN not in caplog.text
 
 
+def test_nvidia_backend_transcribes_with_mocked_model(monkeypatch):
+    model = FakeNemoModel(["  amababi y'ibigori arashye  "])
+    prime_nemo_cache(monkeypatch, model)
+    monkeypatch.setattr(config, "ASR_BACKEND", "nvidia")
+
+    text = asr.transcribe(
+        wav_bytes(), filename="call.wav", content_type="audio/wav"
+    )
+
+    assert text == "amababi y'ibigori arashye"
+    assert len(model.calls) == 1
+    audio_path = Path(model.calls[0]["paths2audio_files"][0])
+    assert not audio_path.exists()
+
+
+def test_nvidia_model_is_loaded_once(monkeypatch):
+    loaded: list[str] = []
+    model = FakeNemoModel(["isazi ziri ku mizi y'ibishyimbo"])
+    install_fake_nemo_modules(
+        monkeypatch, lambda name: loaded.append(name) or model
+    )
+    monkeypatch.setattr(asr, "nemo_is_available", lambda: True)
+    monkeypatch.setattr(asr, "_NEMO_MODEL", None)
+    monkeypatch.setattr(asr, "_NEMO_MODEL_NAME", None)
+    monkeypatch.setattr(config, "ASR_BACKEND", "nvidia")
+    monkeypatch.setattr(config, "NVIDIA_ASR_MODEL", asr.DEFAULT_NVIDIA_ASR_MODEL)
+
+    first = asr.transcribe(wav_bytes(), filename="one.wav")
+    second = asr.transcribe(wav_bytes(), filename="two.wav")
+
+    assert first == second == "isazi ziri ku mizi y'ibishyimbo"
+    assert loaded == [asr.DEFAULT_NVIDIA_ASR_MODEL]
+    assert len(model.calls) == 2
+
+
+def test_nvidia_falls_back_to_sunbird_when_nemo_missing(monkeypatch, caplog):
+    monkeypatch.setattr(config, "ASR_BACKEND", "nvidia")
+    monkeypatch.setattr(config, "ASR_FALLBACK", "sunbird")
+    monkeypatch.setattr(asr, "nemo_is_available", lambda: False)
+    monkeypatch.setattr(asr, "_NEMO_MODEL", None)
+    monkeypatch.setattr(asr, "_NEMO_MODEL_NAME", None)
+    monkeypatch.setattr(
+        asr.SunbirdASR,
+        "transcribe",
+        lambda self, *args, **kwargs: "sunbird fallback",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = asr.transcribe(wav_bytes(), filename="call.wav")
+
+    assert result == "sunbird fallback"
+    assert "NeMo is not installed" in caplog.text
+    assert "Falling back to sunbird ASR" in caplog.text
+
+
+def test_nvidia_falls_back_to_sunbird_when_transcription_fails(
+    monkeypatch, caplog
+):
+    prime_nemo_cache(monkeypatch, BrokenNemoModel())
+    monkeypatch.setattr(config, "ASR_BACKEND", "nvidia")
+    monkeypatch.setattr(config, "ASR_FALLBACK", "sunbird")
+    monkeypatch.setattr(
+        asr.SunbirdASR,
+        "transcribe",
+        lambda self, *args, **kwargs: "sunbird fallback",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = asr.transcribe(wav_bytes(), filename="call.wav")
+
+    assert result == "sunbird fallback"
+    assert "NeMo ASR failed: decoder crashed" in caplog.text
+    assert "Falling back to sunbird ASR" in caplog.text
+
+
+def test_nvidia_falls_back_to_mock_when_sunbird_fails(monkeypatch, caplog):
+    monkeypatch.setattr(config, "ASR_BACKEND", "nvidia")
+    monkeypatch.setattr(config, "ASR_FALLBACK", "sunbird")
+    monkeypatch.setattr(asr, "nemo_is_available", lambda: False)
+    monkeypatch.setattr(asr, "_NEMO_MODEL", None)
+    monkeypatch.setattr(asr, "_NEMO_MODEL_NAME", None)
+
+    def broken_sunbird(self, *args, **kwargs):
+        raise asr.ASRError("Sunbird token is invalid or expired")
+
+    monkeypatch.setattr(asr.SunbirdASR, "transcribe", broken_sunbird)
+    monkeypatch.setattr(
+        asr.MockASR, "transcribe", lambda self, *args, **kwargs: "mock fallback"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = asr.transcribe(wav_bytes(), filename="call.wav")
+
+    assert result == "mock fallback"
+    assert "Sunbird ASR fallback failed" in caplog.text
+    assert "Falling back to mock ASR" in caplog.text
+
+
 def test_mock_backend_accepts_text_and_returns_empty_for_audio(monkeypatch):
     monkeypatch.delenv("MOCK_ASR_TEXT", raising=False)
     backend = asr.MockASR()
@@ -181,6 +343,7 @@ def test_health_reports_asr_backend_without_token():
     response = client.get("/health")
     assert response.status_code == 200
     body = response.json()
-    assert body["asr_backend"] in {"mock", "sunbird"}
+    assert body["asr_backend"] in {"mock", "sunbird", "nvidia"}
+    assert isinstance(body["nemo_available"], bool)
     assert isinstance(body["sunbird_configured"], bool)
     assert "token" not in " ".join(body.keys()).lower()

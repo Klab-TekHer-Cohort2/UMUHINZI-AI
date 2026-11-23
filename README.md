@@ -21,7 +21,7 @@ outbreak alert is sent to nearby farmers and cooperatives.
 | Backend | Python 3.10+ / FastAPI |
 | Telephony + USSD + SMS | Africa's Talking developer sandbox (free) |
 | Machine learning | scikit-learn (TF-IDF), lightweight |
-| Speech recognition | Sunbird AI STT (free developer tier) + mock fallback |
+| Speech recognition | Sunbird AI STT (free tier) or NVIDIA NeMo (local) + mock fallback |
 | Speech synthesis | Sunbird AI TTS (Kinyarwanda, `kin`) + mock fallback |
 | Storage | SQLite |
 | Demo dashboard | Streamlit |
@@ -44,6 +44,7 @@ umuhinzi-ai/
 ├── dashboard/           # Streamlit demo dashboard
 ├── tests/               # pytest tests
 ├── requirements.txt
+├── requirements-nvidia.txt  # optional NeMo STT dependencies
 ├── .env.example
 └── README.md
 ```
@@ -114,7 +115,7 @@ uvicorn app.main:app --reload
 Open <http://127.0.0.1:8000/health> — you should see something like:
 
 ```json
-{"status":"ok","africastalking_configured":false,"asr_backend":"mock","tts_backend":"mock","sunbird_configured":false}
+{"status":"ok","africastalking_configured":false,"asr_backend":"mock","asr_fallback":"sunbird","nemo_available":false,"tts_backend":"mock","sunbird_configured":false}
 ```
 
 `africastalking_configured` is `false` when no real API key is in `.env`
@@ -129,7 +130,7 @@ Interactive API docs: <http://127.0.0.1:8000/docs>
 pytest
 ```
 
-58 tests cover diagnosis, ASR, TTS, storage/alerts, the dashboard and both webhooks.
+65 tests cover diagnosis, ASR, TTS, storage/alerts, the dashboard and both webhooks.
 
 ## HTTP endpoints
 
@@ -351,6 +352,35 @@ SUNBIRD_TIMEOUT_SECONDS=45
 The token is shared by STT and TTS, is never sent to the dashboard and is never
 logged. If the API returns 401/403, create a fresh token at
 <https://api.sunbird.ai/keys>.
+
+### NVIDIA NeMo STT (optional, local)
+
+NeMo runs NVIDIA's Kinyarwanda Conformer RNN-T model locally. Install **ffmpeg**
+(see below), then the extra dependencies:
+
+```powershell
+python -m pip install -r requirements-nvidia.txt
+```
+
+Set in `.env`:
+
+```env
+ASR_BACKEND=nvidia
+NVIDIA_ASR_MODEL=nvidia/stt_rw_conformer_transducer_large
+ASR_FALLBACK=sunbird
+```
+
+The first transcription loads the model once (downloading it if needed) and
+caches it; audio is converted to mono 16 kHz WAV first. `/health` reports
+`asr_backend: "nvidia"` and `nemo_available` without importing NeMo. If NeMo or
+transcription fails, a warning is logged and `ASR_FALLBACK` is used (then mock
+if that also fails).
+
+Tests mock the NeMo model, so nothing is downloaded:
+
+```powershell
+pytest
+```
 
 ## Text-to-speech (Sunbird AI)
 
