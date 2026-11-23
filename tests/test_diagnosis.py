@@ -44,6 +44,14 @@ def test_model_diagnoses_fall_armyworm_kinyarwanda():
     assert result.method in {"model", "keywords"}
 
 
+def test_diagnosis_handles_lowercase_text_without_diacritics():
+    plain = "amababi y'ibigori arashye kandi afite uduhumbi"
+    variant = "ÁMABABI Y'IBIGORI ARASHYE KANDI AFITE UDUHUMBI"
+
+    assert diagnose(plain).pest_id == "fall_armyworm"
+    assert diagnose(variant).pest_id == "fall_armyworm"
+
+
 def test_model_diagnoses_potato_late_blight_english():
     result = diagnose("potato leaves have dark spots and white mold")
     assert result.pest_id == "potato_late_blight"

@@ -7,28 +7,35 @@ Backends are selected with `ASR_BACKEND` in `.env`:
   `MOCK_ASR_TEXT` if set, otherwise an empty string so the voice layer asks the
   farmer to repeat.
 - `sunbird` - calls Sunbird AI's free speech-to-text API with Kinyarwanda
-  (`language=kin`). On any error (missing/expired token, timeout, bad response)
-  we log a clear warning and fall back to mock, i.e. typically an empty
-  transcription and a polite "please repeat" prompt.
-
-TODO (future): add a fully local, open-source Kinyarwanda ASR backend (for
-example a fine-tuned Whisper model) and register it here. Keep the same
-`transcribe(audio)` interface so callers do not change.
+  (`language=kin`). On any error it logs a warning and falls back to mock.
+- `nvidia` - runs NVIDIA's Kinyarwanda Conformer RNN-T model with NeMo. Audio is
+  converted to mono 16 kHz WAV first; NeMo is imported lazily and the model is
+  cached after the first load. On any error it falls back to `ASR_FALLBACK`
+  (`sunbird` by default), then to mock if that also fails.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
+import tempfile
+import threading
+from pathlib import Path
 
 import requests
 
 from app import config
-from app.services.audio import prepare_audio
+from app.services.audio import prepare_audio, prepare_wav_16k_mono
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LANGUAGE = "kin"  # ISO 639-3 code for Kinyarwanda
+DEFAULT_NVIDIA_ASR_MODEL = config.DEFAULT_NVIDIA_ASR_MODEL
+
+_NEMO_MODEL: object | None = None
+_NEMO_MODEL_NAME: str | None = None
+_NEMO_MODEL_LOCK = threading.Lock()
 
 
 class ASRError(RuntimeError):
@@ -175,6 +182,113 @@ class SunbirdASR(BaseASR):
         return text.strip()
 
 
+def nemo_is_available() -> bool:
+    """Check for NeMo without importing it or loading any model."""
+    try:
+        return importlib.util.find_spec("nemo") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _load_nemo_model(model_name: str | None = None) -> object:
+    global _NEMO_MODEL, _NEMO_MODEL_NAME
+
+    name = (model_name or config.NVIDIA_ASR_MODEL or DEFAULT_NVIDIA_ASR_MODEL).strip()
+    with _NEMO_MODEL_LOCK:
+        if _NEMO_MODEL is not None and _NEMO_MODEL_NAME == name:
+            return _NEMO_MODEL
+
+        if not nemo_is_available():
+            raise ASRError("NeMo is not installed; install -r requirements-nvidia.txt")
+
+        try:
+            from nemo.collections.asr.models import EncDecRNNTBPEModel
+        except ImportError as exc:
+            raise ASRError(
+                "NeMo is not installed; install -r requirements-nvidia.txt"
+            ) from exc
+
+        try:
+            model = EncDecRNNTBPEModel.from_pretrained(name)
+        except Exception as exc:
+            raise ASRError(f"Could not load NeMo model {name}") from exc
+
+        _NEMO_MODEL = model
+        _NEMO_MODEL_NAME = name
+        return model
+
+
+def _extract_nemo_transcription(payload: object) -> str | None:
+    if isinstance(payload, (list, tuple)):
+        for item in payload:
+            text = _extract_transcription(item)
+            if text is not None and text.strip():
+                return text
+        return None
+
+    text = _extract_transcription(payload)
+    return text if text is not None and text.strip() else None
+
+
+class NvidiaASR(BaseASR):
+    """Local Kinyarwanda speech recognition with NVIDIA NeMo."""
+
+    def __init__(self, model_name: str | None = None) -> None:
+        self.model_name = (
+            model_name or config.NVIDIA_ASR_MODEL or DEFAULT_NVIDIA_ASR_MODEL
+        ).strip()
+
+    def transcribe(
+        self,
+        audio: bytes | str,
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
+        language: str = DEFAULT_LANGUAGE,
+    ) -> str:
+        if isinstance(audio, str):
+            return audio.strip()
+
+        if not audio:
+            return ""
+
+        try:
+            prepared = prepare_wav_16k_mono(
+                audio, filename=filename, content_type=content_type
+            )
+        except Exception as exc:
+            raise ASRError(f"Could not prepare audio for NeMo: {exc}") from exc
+
+        model = _load_nemo_model(self.model_name)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+            temp_audio.write(prepared.data)
+            audio_path = temp_audio.name
+
+        try:
+            transcribe = getattr(model, "transcribe")
+            result = transcribe(paths2audio_files=[audio_path])
+        except Exception as exc:
+            raise ASRError(f"NeMo ASR failed: {exc}") from exc
+        finally:
+            Path(audio_path).unlink(missing_ok=True)
+
+        text = _extract_nemo_transcription(result)
+        if text is None:
+            raise ASRError("NeMo ASR response did not include a transcription")
+
+        return text.strip()
+
+
+def _fallback_backend_name() -> str:
+    name = (config.ASR_FALLBACK or "sunbird").strip().lower()
+    return name if name in {"mock", "sunbird"} else "mock"
+
+
+def _fallback_asr(name: str) -> BaseASR:
+    return SunbirdASR() if name == "sunbird" else MockASR()
+
+
 def _selected_backend() -> str:
     return (config.ASR_BACKEND or "mock").strip().lower()
 
@@ -192,6 +306,41 @@ def transcribe(
     should then play/read the polite "please repeat" Kinyarwanda prompt.
     """
     backend = _selected_backend()
+
+    if backend == "nvidia":
+        fallback_name = _fallback_backend_name()
+        try:
+            return NvidiaASR().transcribe(
+                audio,
+                filename=filename,
+                content_type=content_type,
+                language=language,
+            )
+        except Exception as exc:
+            logger.warning(
+                "NVIDIA ASR failed: %s. Falling back to %s ASR.",
+                exc,
+                fallback_name,
+            )
+            try:
+                return _fallback_asr(fallback_name).transcribe(
+                    audio,
+                    filename=filename,
+                    content_type=content_type,
+                    language=language,
+                )
+            except Exception as fallback_exc:
+                logger.warning(
+                    "%s ASR fallback failed: %s. Falling back to mock ASR.",
+                    fallback_name.capitalize(),
+                    fallback_exc,
+                )
+                return MockASR().transcribe(
+                    audio,
+                    filename=filename,
+                    content_type=content_type,
+                    language=language,
+                )
 
     if backend != "sunbird":
         return MockASR().transcribe(
